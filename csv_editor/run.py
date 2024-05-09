@@ -73,7 +73,7 @@ class App:
         self.focus_col = 0
 
         self.dirty = True
-        
+        self.text_cache = {}
         self.cursor_graphic = None
         self.column_width = 40
         self.row_height = 20
@@ -119,12 +119,30 @@ class App:
             
         self.screen.blit(self.background, [0, 0])
 
+
+
+        for row in self.spreadsheet.data:
+            for col in self.spreadsheet.data[row]:
+                text = self.spreadsheet.get(row, col)
+                if text not in self.text_cache:
+                    self.text_cache[text] = self.graphics_interface.draw_text(FontDefinition("courier new", 10), self.spreadsheet.get(row, col), [255,255,255])
+                self.screen.blit(self.text_cache[text], [col * self.column_width, row * self.row_height])
+            
+            
+
+        
         if self.cursor_graphic is None:
             self.cursor_graphic = self.graphics_interface.create_drawing_surface([self.column_width, self.row_height])
             self.graphics_interface.draw_rectangle(self.cursor_graphic, [255,255,0], Rectangle(0, 0, self.column_width, self.row_height), 4)
 
+
+
+
+            
         cursor_pos = self.spreadsheet.get_cursor()
         self.screen.blit(self.cursor_graphic, [cursor_pos[1] * self.column_width, cursor_pos[0] * self.row_height])       
+
+
         
 
     def parse_events(self) -> None:
@@ -179,6 +197,8 @@ class App:
 
     def redirect_input_to_prompt(self, event: IOEvent):
         if event.key == K_RETURN:
+            row, col = self.spreadsheet.get_cursor()
+            self.spreadsheet.set(row, col, self.input_box_contents)
             logger.info(f"Typed: {self.input_box_contents}")
             self.input_box_contents = ""
             self.toggle_input_box = False
