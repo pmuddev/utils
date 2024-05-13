@@ -25,23 +25,48 @@ from graphics.bridging.pygame_interface import PygameInputInterface, PygameGraph
 PROFILER_ENABLED = False
 PROFILER = cProfile.Profile()
 
-
 VALID_CHARS = " `1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./"
 SHIFT_CHARS = ' ~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>?'
+
+
+class Cell:
+    def __init__(self, row: int, col: int):
+        self.row: int = row
+        self.col: int = col
+
+    def copy(self) -> Cell:
+        return Cell(self.row, self.col)
 
 
 class Spreadsheet:
     def __init__(self):
         self.data = {}
-        self.cursor = [0, 0]
-        self.mark = [0, 0]
+        self.cursor = Cell(0, 0)
+        self.mark = Cell(0, 0)
 
-    def move_cursor(self, row: int, col: int) -> None:
-        self.cursor = [row, col]
+    def move_cursor(self, cell: Cell) -> None:
+        self.cursor = cell.copy()
 
-    def get_cursor(self) -> Tuple[int, int]:
-        return copy.copy(self.cursor)
-            
+    def get_cursor(self) -> Cell:
+        return self.cursor.copy()
+
+    def move_mark(self, cell: Cell) -> None:
+        self.mark = cell.copy()
+
+    def get_mark(self) -> Cell:
+        return self.mark.copy()
+
+    def get_bounding_box(self) -> Tuple[Cell, Cell]:
+        bbox_min = Cell(
+            min(self.cursor.row, self.mark.row),
+            min(self.cursor.col, self.mark.col)
+        )
+        bbox_max = Cell(
+            max(self.cursor.row, self.mark.row),
+            max(self.cursor.col, self.mark.col)
+        )
+        return (bbox_min, bbox_max)
+        
     def set(self, row: int, col: int, val: str) -> None:
         if row not in self.data:
             self.data[row] = {}
@@ -62,11 +87,14 @@ class App:
     SIZE = W, H
 
     def __init__(self):
+
         self.graphics_interface: GraphicsInterface = PygameGraphicsInterface()
         self.input_interface: InputInterface = PygameInputInterface()
         self.fps_log = []
+
         self.screen = self.graphics_interface.create_screen(self.SIZE)
         self.running = True
+
         self.max_row = 100
         self.max_col = 100
         self.focus_row = 0
@@ -79,17 +107,14 @@ class App:
         self.row_height = 20
         self.background = None
         self.version_info = "csved"
-
+        self.mark_graphic = None
+        
         self.toggle_input_box = False
         self.input_box_contents = ""
 
         self.spreadsheet = Spreadsheet()
-        
         self.graphics_interface.set_display_caption(self.version_info)
 
-    def parse_events():
-        pass
-    
     def run(self) -> None:
         logger.debug("Connecting...")
         logger.debug("Done.")
@@ -109,7 +134,6 @@ class App:
             for col in range(0, cols):
                 surface.blit(cell, [col * self.column_width, row * self.row_height])
 
-        #surface.blit(self.graphics_interface.draw_text(FontDefinition("arial", 16), "hello", [255, 255, 255]), [0, 0])
 
         
     def draw(self):
@@ -119,8 +143,6 @@ class App:
             
         self.screen.blit(self.background, [0, 0])
 
-
-
         for row in self.spreadsheet.data:
             for col in self.spreadsheet.data[row]:
                 text = self.spreadsheet.get(row, col)
@@ -128,19 +150,33 @@ class App:
                     self.text_cache[text] = self.graphics_interface.draw_text(FontDefinition("courier new", 10), self.spreadsheet.get(row, col), [255,255,255])
                 self.screen.blit(self.text_cache[text], [col * self.column_width, row * self.row_height])
             
-            
+        bbox_min, bbox_max = self.spreadsheet.get_bounding_box()
+        bbox_width = bbox_max.col - bbox_min.col + 1
+        bbox_height = bbox_max.row - bbox_min.row + 1
 
+        if self.dirty or self.mark_graphic is None:
+            self.mark_graphic = self.graphics_interface.create_drawing_surface([self.column_width * bbox_width, self.row_height * bbox_height])
+            self.mark_graphic.convert_alpha()
+            self.mark_graphic.fill((120, 120, 0))
+            self.mark_graphic.set_alpha(100)
+        self.screen.blit(
+            self.mark_graphic,
+            [bbox_min.col * self.column_width, bbox_min.row * self.row_height]
+        )
+        
         
         if self.cursor_graphic is None:
             self.cursor_graphic = self.graphics_interface.create_drawing_surface([self.column_width, self.row_height])
+            self.cursor_graphic.set_color_key((0,0,0))
+            self.cursor_graphic.fill((0,0,0)) 
             self.graphics_interface.draw_rectangle(self.cursor_graphic, [255,255,0], Rectangle(0, 0, self.column_width, self.row_height), 4)
 
 
 
 
             
-        cursor_pos = self.spreadsheet.get_cursor()
-        self.screen.blit(self.cursor_graphic, [cursor_pos[1] * self.column_width, cursor_pos[0] * self.row_height])       
+        cursor_pos: Cell = self.spreadsheet.get_cursor()
+        self.screen.blit(self.cursor_graphic, [cursor_pos.col * self.column_width, cursor_pos.row * self.row_height])       
 
 
         
@@ -171,6 +207,8 @@ class App:
 
     def parse_keyboard_input_down(self, event: IOEvent):
         self.dirty = True
+        current_pos: Cell  = self.spreadsheet.get_cursor()
+        current_mark: Cell = self.spreadsheet.get_mark()
         
         logger.info(f"Key down: {event.key}")
         if self.toggle_input_box:
@@ -182,23 +220,51 @@ class App:
             self.input_box_dirty = True
 
         elif event.key == K_DOWN:
-            logger.info("moving down")
-            current_row, current_col  = self.spreadsheet.get_cursor()
-            self.spreadsheet.move_cursor(min(self.max_row, current_row+1), current_col)
+            target = Cell(
+                min(self.max_row, current_pos.row + 1),
+                current_pos.col
+            )
+            self.spreadsheet.move_cursor(target)
+            if not self.input_interface.is_shift_down():
+                self.spreadsheet.move_mark(target)
+
         elif event.key == K_UP:
-            current_row, current_col  = self.spreadsheet.get_cursor()
-            self.spreadsheet.move_cursor(max(0, current_row-1), current_col)
+            target = Cell(
+                max(0, current_pos.row-1),
+                current_pos.col
+            )
+            self.spreadsheet.move_cursor(target)
+            if not self.input_interface.is_shift_down():
+                self.spreadsheet.move_mark(target)
+
         elif event.key == K_RIGHT:
-            current_row, current_col  = self.spreadsheet.get_cursor()
-            self.spreadsheet.move_cursor(current_row, min(self.max_col, current_col+1))
+            target = Cell(
+                current_pos.row,
+                min(self.max_col, current_pos.col+1)
+            )
+            self.spreadsheet.move_cursor(target)
+            if not self.input_interface.is_shift_down():
+                self.spreadsheet.move_mark(target)
+
         elif event.key == K_LEFT:
-            current_row, current_col  = self.spreadsheet.get_cursor()
-            self.spreadsheet.move_cursor(current_row, max(0, current_col-1))
+            target = Cell(
+                current_pos.row,
+                max(0, current_pos.col-1)
+            )
+            self.spreadsheet.move_cursor(target)
+            if not self.input_interface.is_shift_down():
+                self.spreadsheet.move_mark(target)
+                    
+            
 
     def redirect_input_to_prompt(self, event: IOEvent):
         if event.key == K_RETURN:
-            row, col = self.spreadsheet.get_cursor()
-            self.spreadsheet.set(row, col, self.input_box_contents)
+            current_pos = self.spreadsheet.get_cursor()
+            self.spreadsheet.set(
+                current_pos.row,
+                current_pos.col,
+                self.input_box_contents
+            )
             logger.info(f"Typed: {self.input_box_contents}")
             self.input_box_contents = ""
             self.toggle_input_box = False
