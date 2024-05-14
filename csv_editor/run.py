@@ -66,18 +66,69 @@ class Spreadsheet:
             max(self.cursor.col, self.mark.col)
         )
         return (bbox_min, bbox_max)
-        
-    def set(self, row: int, col: int, val: str) -> None:
-        if row not in self.data:
-            self.data[row] = {}
-        self.data[row][col] = val
 
-    def get(self, row: int, col: int) -> Optional[str]:
-        if row not in self.data or col not in self.data[row]:
+    def get_selected_cells(self, include_empty=False) -> List[Cell]:
+        ret = []
+        bbox_min, bbox_max = self.get_bounding_box()
+        for row in range(bbox_min.row, bbox_max.row + 1):
+            if include_empty or row in self.data:
+                for col in range(bbox_min.col, bbox_max.col +1):
+                    if include_empty or col in self.data[row]:
+                        ret.append(Cell(row, col))
+        return ret          
+
+    def delete(self, cell: Cell) -> None:
+        self.set(cell, None)
+    
+    def set(self, cell: Cell, val: str) -> None:
+        if val is not None:
+            if cell.row not in self.data:
+                self.data[cell.row] = {}
+            self.data[cell.row][cell.col] = val
+        elif cell.row in self.data and cell.col in self.data[cell.row]:
+            self.data[cell.row].pop(cell.col)        
+
+    def get(self, cell: Cell) -> Optional[str]:
+        if cell.row not in self.data or cell.col not in self.data[cell.row]:
             return None
         else:
-            return self.data[row][col]
+            return self.data[cell.row][cell.col]
 
+
+def iterate_function(cell: Cell, spreadsheet: Spreadsheet):
+    rule = "01101110"
+    
+    if spreadsheet.get(cell) is None:
+        # Check parents
+        tl = spreadsheet.get(Cell(cell.row - 1, cell.col - 1))
+        tc = spreadsheet.get(Cell(cell.row - 1, cell.col))
+        tr = spreadsheet.get(Cell(cell.row - 1, cell.col + 1))
+
+        # Validate
+        count_parents = 0
+        for parent in [tl, tc, tr]:
+            if parent in ["0", "1"]:
+                count_parents +=1
+
+        if count_parents < 3 and count_parents > 0:
+            return (cell, "0")
+        elif count_parents == 0:
+            return (cell, None)
+                
+        # check value
+        val_map = {
+            "111": rule[0],
+            "110": rule[1],
+            "101": rule[2],
+            "100": rule[3],
+            "011": rule[4],
+            "010": rule[5],
+            "001": rule[6],
+            "000": rule[7]
+        }
+        return (cell, val_map[tl+tc+tr])
+    else:
+        return (cell, spreadsheet.get(cell))
 
 class App:
 
@@ -129,7 +180,12 @@ class App:
 
     def draw_grid(self, surface: DrawingSurface, rows, cols):
         cell = self.graphics_interface.create_drawing_surface([self.column_width, self.row_height])
-        self.graphics_interface.draw_rectangle(cell, [200, 200, 200], Rectangle(0, 0, self.column_width, self.row_height), 2)
+        self.graphics_interface.draw_rectangle(
+            cell,
+            [200, 200, 200],
+            Rectangle(0, 0, self.column_width, self.row_height),
+            2
+        )
         for row in range(0, rows):
             for col in range(0, cols):
                 surface.blit(cell, [col * self.column_width, row * self.row_height])
@@ -145,10 +201,17 @@ class App:
 
         for row in self.spreadsheet.data:
             for col in self.spreadsheet.data[row]:
-                text = self.spreadsheet.get(row, col)
+                text = self.spreadsheet.get(Cell(row, col))
                 if text not in self.text_cache:
-                    self.text_cache[text] = self.graphics_interface.draw_text(FontDefinition("courier new", 10), self.spreadsheet.get(row, col), [255,255,255])
-                self.screen.blit(self.text_cache[text], [col * self.column_width, row * self.row_height])
+                    self.text_cache[text] = self.graphics_interface.draw_text(
+                        FontDefinition("courier new", 16),
+                        self.spreadsheet.get(Cell(row, col)),
+                        [255,255,255],
+                    )
+                self.screen.blit(
+                    self.text_cache[text],
+                    [2 + col * self.column_width, 2 + row * self.row_height]
+                )
             
         bbox_min, bbox_max = self.spreadsheet.get_bounding_box()
         bbox_width = bbox_max.col - bbox_min.col + 1
@@ -157,8 +220,8 @@ class App:
         if self.dirty or self.mark_graphic is None:
             self.mark_graphic = self.graphics_interface.create_drawing_surface([self.column_width * bbox_width, self.row_height * bbox_height])
             self.mark_graphic.convert_alpha()
-            self.mark_graphic.fill((120, 120, 0))
             self.mark_graphic.set_alpha(100)
+            self.mark_graphic.fill((200, 120, 0))
         self.screen.blit(
             self.mark_graphic,
             [bbox_min.col * self.column_width, bbox_min.row * self.row_height]
@@ -171,10 +234,6 @@ class App:
             self.cursor_graphic.fill((0,0,0)) 
             self.graphics_interface.draw_rectangle(self.cursor_graphic, [255,255,0], Rectangle(0, 0, self.column_width, self.row_height), 4)
 
-
-
-
-            
         cursor_pos: Cell = self.spreadsheet.get_cursor()
         self.screen.blit(self.cursor_graphic, [cursor_pos.col * self.column_width, cursor_pos.row * self.row_height])       
 
@@ -254,15 +313,21 @@ class App:
             self.spreadsheet.move_cursor(target)
             if not self.input_interface.is_shift_down():
                 self.spreadsheet.move_mark(target)
-                    
-            
+        elif event.key == K_DELETE:
+            for cell in self.spreadsheet.get_selected_cells():
+                self.spreadsheet.delete(cell)
+        elif event.key == K_SPACE:
+            result = []
+            for cell in self.spreadsheet.get_selected_cells(include_empty=True):
+                result.append(iterate_function(cell, self.spreadsheet))
+            for cell, val in result:
+                self.spreadsheet.set(cell, val)
 
     def redirect_input_to_prompt(self, event: IOEvent):
         if event.key == K_RETURN:
             current_pos = self.spreadsheet.get_cursor()
             self.spreadsheet.set(
-                current_pos.row,
-                current_pos.col,
+                current_pos,
                 self.input_box_contents
             )
             logger.info(f"Typed: {self.input_box_contents}")
