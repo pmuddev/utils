@@ -12,6 +12,7 @@ from pstats import SortKey
 from typing import List, Optional, Union
 import copy
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -202,12 +203,29 @@ class App:
         for row in self.spreadsheet.data:
             for col in self.spreadsheet.data[row]:
                 text = self.spreadsheet.get(Cell(row, col))
+                formatting = None
+
+                if "??" in text:
+                    formatting, text = text.split("??")
+                
                 if text not in self.text_cache:
                     self.text_cache[text] = self.graphics_interface.draw_text(
                         FontDefinition("courier new", 16),
                         self.spreadsheet.get(Cell(row, col)),
                         [255,255,255],
                     )
+
+                if formatting is not None:
+                    bg_pattern = re.compile(r".*bg\((\d+),(\d+),(\d+)\).*")
+                    bg_matcher = bg_pattern.match(formatting)
+                    if bg_matcher:
+                        color = [
+                            int(bg_matcher.group(1)),
+                            int(bg_matcher.group(2)),
+                            int(bg_matcher.group(3))
+                        ]
+
+                
                 self.screen.blit(
                     self.text_cache[text],
                     [2 + col * self.column_width, 2 + row * self.row_height]
