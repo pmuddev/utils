@@ -23,6 +23,22 @@ import math
 from graphics.bridging.interface import GraphicsInterface, DrawingSurface, Rectangle, InputInterface, FontDefinition, IOEvent
 from graphics.bridging.pygame_interface import PygameInputInterface, PygameGraphicsInterface
 
+SS_CELL_WIDTH_PARAM = "ss.cell_width"
+SS_CELL_HEIGHT_PARAM = "ss.cell_height"
+SS_BORDER_WIDTH_PARAM = "ss.cell_border_width"
+SS_FONT_SIZE_PARAM = "ss.font_size"
+SS_FONT_FACE_PARAM = "ss.courier_new"
+
+SS_CELL_WIDTH_VALUE = 12
+SS_CELL_HEIGHT_VALUE = 20
+SS_CELL_BORDER_WIDTH = 1
+SS_CELL_TEXT_PADDING_VALUE = 1
+SS_FONT_SIZE_VALUE = 16
+SS_FONT_FACE_VALUE = "courier new"
+SS_MARK_COLOR = [200, 0, 0]
+SS_CURSOR_HIGHLIGHT_COLOR = [200, 200, 0]
+SS_CURSOR_BORDER_WIDTH = 1
+
 PROFILER_ENABLED = False
 PROFILER = cProfile.Profile()
 
@@ -98,12 +114,25 @@ class Spreadsheet:
 
 def iterate_function(cell: Cell, spreadsheet: Spreadsheet):
     rule = "01101110"
-    
+
+    def colorize(cell_val):
+        if cell_val == "0":
+            return "bg(255,255,255);fg(255,255,255)??0"
+        else:
+            return "bg(0,0,0);fg(0,0,0)??1"
+
+    def get_content(cell_val):
+        if cell_val is not None and "??" in cell_val:
+            return cell_val.split("??")[1]
+        else:
+            return cell_val
+        
+        
     if spreadsheet.get(cell) is None:
         # Check parents
-        tl = spreadsheet.get(Cell(cell.row - 1, cell.col - 1))
-        tc = spreadsheet.get(Cell(cell.row - 1, cell.col))
-        tr = spreadsheet.get(Cell(cell.row - 1, cell.col + 1))
+        tl = get_content(spreadsheet.get(Cell(cell.row - 1, cell.col - 1)))
+        tc = get_content(spreadsheet.get(Cell(cell.row - 1, cell.col)))
+        tr = get_content(spreadsheet.get(Cell(cell.row - 1, cell.col + 1)))
 
         # Validate
         count_parents = 0
@@ -112,7 +141,7 @@ def iterate_function(cell: Cell, spreadsheet: Spreadsheet):
                 count_parents +=1
 
         if count_parents < 3 and count_parents > 0:
-            return (cell, "0")
+            return (cell, colorize("0"))
         elif count_parents == 0:
             return (cell, None)
                 
@@ -127,7 +156,7 @@ def iterate_function(cell: Cell, spreadsheet: Spreadsheet):
             "001": rule[6],
             "000": rule[7]
         }
-        return (cell, val_map[tl+tc+tr])
+        return (cell, colorize(val_map[tl+tc+tr]))
     else:
         return (cell, spreadsheet.get(cell))
 
@@ -155,8 +184,6 @@ class App:
         self.dirty = True
         self.text_cache = {}
         self.cursor_graphic = None
-        self.column_width = 40
-        self.row_height = 20
         self.background = None
         self.version_info = "csved"
         self.mark_graphic = None
@@ -179,21 +206,21 @@ class App:
 
         self.graphics_interface.quit()
 
-    def draw_grid(self, surface: DrawingSurface, rows, cols):
-        cell = self.graphics_interface.create_drawing_surface([self.column_width, self.row_height])
+    def draw_grid(self, surface: DrawingSurface, rows, cols) -> None:
+        cell = self.graphics_interface.create_drawing_surface([SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE])
         self.graphics_interface.draw_rectangle(
             cell,
             [200, 200, 200],
-            Rectangle(0, 0, self.column_width, self.row_height),
-            2
+            Rectangle(0, 0, SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE),
+            SS_CELL_BORDER_WIDTH
         )
         for row in range(0, rows):
             for col in range(0, cols):
-                surface.blit(cell, [col * self.column_width, row * self.row_height])
+                surface.blit(cell, [col * SS_CELL_WIDTH_VALUE, row * SS_CELL_HEIGHT_VALUE])
 
 
         
-    def draw(self):
+    def draw(self) -> None:
         if self.background is None:
             self.background = self.graphics_interface.create_drawing_surface([640, 480])
             self.draw_grid(self.background, 20, 40)
@@ -203,32 +230,63 @@ class App:
         for row in self.spreadsheet.data:
             for col in self.spreadsheet.data[row]:
                 text = self.spreadsheet.get(Cell(row, col))
-                formatting = None
-
-                if "??" in text:
-                    formatting, text = text.split("??")
-                
                 if text not in self.text_cache:
-                    self.text_cache[text] = self.graphics_interface.draw_text(
-                        FontDefinition("courier new", 16),
-                        self.spreadsheet.get(Cell(row, col)),
-                        [255,255,255],
+
+                    if "??" in text:
+                        formatting, content_text = text.split("??")
+                    else:
+                        formatting = None
+                        content_text = text
+                        
+                        
+                    bg_color = None
+                    fg_color = [255, 255, 255]
+                    if formatting is not None:
+                        bg_pattern = re.compile(r".*bg\((\d+),(\d+),(\d+)\).*")
+                        bg_matcher = bg_pattern.match(formatting)
+                        if bg_matcher:
+                            bg_color = [
+                                int(bg_matcher.group(1)),
+                                int(bg_matcher.group(2)),
+                                int(bg_matcher.group(3))
+                            ]
+
+                        fg_pattern = re.compile(r".*fg\((\d+),(\d+),(\d+)\).*")
+                        fg_matcher = fg_pattern.match(formatting)
+                        if fg_matcher:
+                            fg_color = [
+                                int(fg_matcher.group(1)),
+                                int(fg_matcher.group(2)),
+                                int(fg_matcher.group(3))
+                            ]
+
+
+                    rendered_text = self.graphics_interface.draw_text(
+                        FontDefinition(
+                            SS_FONT_FACE_VALUE,
+                            SS_FONT_SIZE_VALUE
+                        ),
+                        content_text,
+                        fg_color
                     )
 
-                if formatting is not None:
-                    bg_pattern = re.compile(r".*bg\((\d+),(\d+),(\d+)\).*")
-                    bg_matcher = bg_pattern.match(formatting)
-                    if bg_matcher:
-                        color = [
-                            int(bg_matcher.group(1)),
-                            int(bg_matcher.group(2)),
-                            int(bg_matcher.group(3))
-                        ]
-
+                    if bg_color is not None:
+                        text_surface = self.graphics_interface.create_drawing_surface(
+                            [rendered_text.get_width(), rendered_text.get_height()]
+                        )
+                        text_surface.fill(bg_color)
+                        text_surface.blit(rendered_text, [0,0])
+                    
+                        self.text_cache[text] = text_surface
+                    else:
+                        self.text_cache[text] = rendered_text
                 
                 self.screen.blit(
                     self.text_cache[text],
-                    [2 + col * self.column_width, 2 + row * self.row_height]
+                    [
+                        SS_CELL_TEXT_PADDING_VALUE + col * SS_CELL_WIDTH_VALUE,
+                        SS_CELL_TEXT_PADDING_VALUE + row * SS_CELL_HEIGHT_VALUE
+                    ]
                 )
             
         bbox_min, bbox_max = self.spreadsheet.get_bounding_box()
@@ -236,26 +294,35 @@ class App:
         bbox_height = bbox_max.row - bbox_min.row + 1
 
         if self.dirty or self.mark_graphic is None:
-            self.mark_graphic = self.graphics_interface.create_drawing_surface([self.column_width * bbox_width, self.row_height * bbox_height])
+            self.mark_graphic = self.graphics_interface.create_drawing_surface([SS_CELL_WIDTH_VALUE * bbox_width, SS_CELL_HEIGHT_VALUE * bbox_height])
             self.mark_graphic.convert_alpha()
             self.mark_graphic.set_alpha(100)
-            self.mark_graphic.fill((200, 120, 0))
+            self.mark_graphic.fill(SS_MARK_COLOR)
         self.screen.blit(
             self.mark_graphic,
-            [bbox_min.col * self.column_width, bbox_min.row * self.row_height]
+            [bbox_min.col * SS_CELL_WIDTH_VALUE, bbox_min.row * SS_CELL_HEIGHT_VALUE]
         )
         
         
         if self.cursor_graphic is None:
-            self.cursor_graphic = self.graphics_interface.create_drawing_surface([self.column_width, self.row_height])
+            self.cursor_graphic = self.graphics_interface.create_drawing_surface([SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE])
             self.cursor_graphic.set_color_key((0,0,0))
             self.cursor_graphic.fill((0,0,0)) 
-            self.graphics_interface.draw_rectangle(self.cursor_graphic, [255,255,0], Rectangle(0, 0, self.column_width, self.row_height), 4)
+            self.graphics_interface.draw_rectangle(
+                self.cursor_graphic,
+                SS_CURSOR_HIGHLIGHT_COLOR,
+                Rectangle(0, 0, SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE),
+                SS_CURSOR_BORDER_WIDTH
+            )
 
         cursor_pos: Cell = self.spreadsheet.get_cursor()
-        self.screen.blit(self.cursor_graphic, [cursor_pos.col * self.column_width, cursor_pos.row * self.row_height])       
-
-
+        self.screen.blit(
+            self.cursor_graphic,
+            [
+                cursor_pos.col * SS_CELL_WIDTH_VALUE,
+                cursor_pos.row * SS_CELL_HEIGHT_VALUE
+            ]
+        )       
         
 
     def parse_events(self) -> None:
