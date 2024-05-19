@@ -111,8 +111,48 @@ class Spreadsheet:
         else:
             return self.data[cell.row][cell.col]
 
+def iterate_function_v2(cell: Cell, spreadsheet: Spreadsheet):
+    def colorize(cell_val):
+        if cell_val == "0":
+            return None
+        else:
+            return "bg(0,0,0);fg(0,0,0)??1"
 
-def iterate_function(cell: Cell, spreadsheet: Spreadsheet):
+    def get_content(cell_val: str) -> int:
+        if cell_val is not None and "??" in cell_val:
+            return int(cell_val.split("??")[1])
+        elif cell_val is not None:
+            return int(cell_val)
+        else:
+            return 0
+
+    current_state = get_content(spreadsheet.get(Cell(cell.row, cell.col)))
+    neighbours = [  
+        get_content(spreadsheet.get(Cell(cell.row - 1, cell.col - 1))),
+        get_content(spreadsheet.get(Cell(cell.row - 1, cell.col))),
+        get_content(spreadsheet.get(Cell(cell.row - 1, cell.col + 1))),
+        get_content(spreadsheet.get(Cell(cell.row, cell.col -1))),
+        get_content(spreadsheet.get(Cell(cell.row, cell.col + 1))),
+        get_content(spreadsheet.get(Cell(cell.row + 1, cell.col -1))),
+        get_content(spreadsheet.get(Cell(cell.row + 1, cell.col))),
+        get_content(spreadsheet.get(Cell(cell.row + 1, cell.col + 1))),
+    ]
+
+    alive_neighbours = sum(neighbours)
+    if current_state == 1:
+        if alive_neighbours < 2 or alive_neighbours > 3:
+            return (cell, colorize("0"))
+        else:
+            return (cell, colorize("1"))
+    else:
+        if alive_neighbours == 3:
+            return (cell, colorize("1"))
+        else:
+            return (cell, colorize("0"))
+
+
+        
+def iterate_function_v1(cell: Cell, spreadsheet: Spreadsheet):
     rule = "01101110"
 
     def colorize(cell_val):
@@ -208,9 +248,10 @@ class App:
 
     def draw_grid(self, surface: DrawingSurface, rows, cols) -> None:
         cell = self.graphics_interface.create_drawing_surface([SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE])
+        cell.fill([255, 255, 255])
         self.graphics_interface.draw_rectangle(
             cell,
-            [200, 200, 200],
+            [127, 127, 127],
             Rectangle(0, 0, SS_CELL_WIDTH_VALUE, SS_CELL_HEIGHT_VALUE),
             SS_CELL_BORDER_WIDTH
         )
@@ -223,7 +264,7 @@ class App:
     def draw(self) -> None:
         if self.background is None:
             self.background = self.graphics_interface.create_drawing_surface([640, 480])
-            self.draw_grid(self.background, 20, 40)
+            self.draw_grid(self.background, 25, 60)
             
         self.screen.blit(self.background, [0, 0])
 
@@ -240,7 +281,7 @@ class App:
                         
                         
                     bg_color = None
-                    fg_color = [255, 255, 255]
+                    fg_color = [0, 0, 0]
                     if formatting is not None:
                         bg_pattern = re.compile(r".*bg\((\d+),(\d+),(\d+)\).*")
                         bg_matcher = bg_pattern.match(formatting)
@@ -404,7 +445,7 @@ class App:
         elif event.key == K_SPACE:
             result = []
             for cell in self.spreadsheet.get_selected_cells(include_empty=True):
-                result.append(iterate_function(cell, self.spreadsheet))
+                result.append(iterate_function_v2(cell, self.spreadsheet))
             for cell, val in result:
                 self.spreadsheet.set(cell, val)
 
